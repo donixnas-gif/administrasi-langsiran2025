@@ -303,6 +303,7 @@
                                     <th scope="col" class="px-2 py-2 sm:px-4 sm:py-3 sortable" data-column="Kode Barang">Kode Barang<span class="sort-arrow"></span></th>
                                     <th scope="col" class="px-2 py-2 sm:px-4 sm:py-3 text-right sortable" data-column="Jumlah">Jumlah<span class="sort-arrow"></span></th>
                                     <th scope="col" class="px-2 py-2 sm:px-4 sm:py-3">Keterangan</th>
+                                    <th scope="col" class="px-2 py-2 sm:px-4 sm:py-3 sortable text-center" data-column="Selisih">Selisih<span class="sort-arrow"></span></th>
                                     <th scope="col" class="px-2 py-2 sm:px-4 sm:py-3">Status</th>
                                     <th scope="col" class="px-2 py-2 sm:px-4 sm:py-3 text-center no-print admin-only">Aksi</th>
                                 </tr>
@@ -344,6 +345,7 @@
                                     <th scope="col" class="px-2 py-2 sm:px-4 sm:py-3 sortable" data-column="Kode Barang">Kode Barang<span class="sort-arrow"></span></th>
                                     <th scope="col" class="px-2 py-2 sm:px-4 sm:py-3 text-right sortable" data-column="Jumlah">Jumlah<span class="sort-arrow"></span></th>
                                     <th scope="col" class="px-2 py-2 sm:px-4 sm:py-3">Keterangan</th>
+                                    <th scope="col" class="px-2 py-2 sm:px-4 sm:py-3 sortable text-center" data-column="Selisih">Selisih<span class="sort-arrow"></span></th>
                                     <th scope="col" class="px-2 py-2 sm:px-4 sm:py-3">Status</th>
                                     <th scope="col" class="px-2 py-2 sm:px-4 sm:py-3 text-center no-print admin-only">Aksi</th>
                                 </tr>
@@ -809,7 +811,7 @@
                 if(el) el.classList.remove('hidden');
             });
 
-            document.getElementById('data-tables-container').classList.add('md:grid-cols-2');
+            document.getElementById('data-tables-container').classList.remove('md:grid-cols-2');
         };
         
         // --- Manajemen Data ---
@@ -818,44 +820,42 @@
             if (!tableBody) return;
             tableBody.innerHTML = '';
             const isAdmin = currentUserRole === 'admin';
-            const colspan = isAdmin ? 10 : 8;
+            const colspan = isAdmin ? 10 : 8; // Disesuaikan karena selisih tidak dihitung di riwayat
             const isHistoryTable = tableBodyId.includes('riwayat');
 
-            // --- START DUPLICATE DETECTION LOGIC ---
-            const counts = new Map();
+            const allDataKirim = [...todayDataKirim, ...historyDataKirim];
+            const allDataTerima = [...todayDataTerima, ...historyDataTerima];
+            
+            // Hanya hitung agregat jika kita merender tabel terkini
+            let aggregatedTotals;
             if (!isHistoryTable) {
-                data.forEach(row => {
-                    const key = `${String(row['No BPB'] || '').trim().toUpperCase()}-${advancedNormalizeItemCode(row['Kode Barang'])}`;
-                    counts.set(key, (counts.get(key) || 0) + 1);
+                aggregatedTotals = new Map();
+                [...todayDataKirim, ...todayDataTerima].forEach(r => {
+                    // Kunci agregasi HANYA berdasarkan No. BPB
+                    const key = `${String(r['No BPB'] || '').trim().toUpperCase()}`;
+                    if (!aggregatedTotals.has(key)) {
+                        aggregatedTotals.set(key, { jmlKirim: 0, jmlTerima: 0 });
+                    }
+                    const entry = aggregatedTotals.get(key);
+                    if (r['Nama Pengirim']) { 
+                        entry.jmlKirim += parseInt(r.Jumlah || 0);
+                    } else { 
+                        entry.jmlTerima += parseInt(r.Jumlah || 0);
+                    }
                 });
             }
-            const duplicates = new Set();
-            for (const [key, count] of counts.entries()) {
-                if (count > 1) {
-                    duplicates.add(key);
-                }
-            }
-            // --- END DUPLICATE DETECTION LOGIC ---
 
             if (data.length === 0) {
-                tableBody.innerHTML = `<tr><td colspan="${colspan}" class="text-center p-4">Tidak ada data.</td></tr>`;
+                tableBody.innerHTML = `<tr><td colspan="${isHistoryTable ? colspan : colspan + 1}" class="text-center p-4">Tidak ada data.</td></tr>`;
                 return;
             }
             let totalJumlah = 0;
-            const allDataKirim = [...todayDataKirim, ...historyDataKirim];
-            const allDataTerima = [...todayDataTerima, ...historyDataTerima];
 
             data.forEach(row => {
                 const tr = document.createElement('tr');
                 let rowClasses = ['bg-gray-800', 'border-b', 'border-gray-700', 'hover:bg-gray-600'];
                 if (row.Tanda === 'MARKED') {
                     rowClasses.push('marked-row');
-                }
-                
-                const currentKey = `${String(row['No BPB'] || '').trim().toUpperCase()}-${advancedNormalizeItemCode(row['Kode Barang'])}`;
-                if (duplicates.has(currentKey)) {
-                    rowClasses.push('duplicate-row');
-                    tr.title = 'Data duplikat terdeteksi untuk No. BPB dan Kode Barang ini.';
                 }
 
                 tr.className = rowClasses.join(' ');
@@ -935,6 +935,19 @@
                     }
                 }
 
+                // --- SELISIH LOGIC FOR TERKINI TABLES (UPDATED) ---
+                let selisihHtml = '';
+                if (!isHistoryTable) {
+                    const aggregateKey = noBpb; // Kunci berdasarkan No BPB saja
+                    const totals = aggregatedTotals.get(aggregateKey) || { jmlKirim: 0, jmlTerima: 0 };
+                    const selisih = totals.jmlTerima - totals.jmlKirim;
+                    
+                    const selisihClass = selisih < 0 ? 'text-red-400' : (selisih > 0 ? 'text-amber-400' : 'text-green-400');
+                    const selisihText = selisih > 0 ? `+${selisih}` : selisih;
+                    selisihHtml = `<td class="px-2 py-2 sm:px-4 sm:py-3 text-center font-bold ${selisihClass}" title="Total Selisih untuk BPB ${noBpb}">${selisihText}</td>`;
+                }
+
+
                 let rowHtml = `
                     ${isAdmin ? `<td class="px-2 py-2 sm:px-4 sm:py-3 no-print"><input type="checkbox" class="row-checkbox h-4 w-4 text-blue-600 bg-gray-700 border-gray-600 rounded" data-row-index="${row.rowIndex}" data-type="${type}" data-table-id="${tableBodyId}"></td>` : ''}
                     <td class="px-2 py-2 sm:px-4 sm:py-3">${formattedDate}</td>
@@ -944,6 +957,7 @@
                     <td class="px-2 py-2 sm:px-4 sm:py-3">${kodeBarang}</td>
                     <td class="px-2 py-2 sm:px-4 sm:py-3 text-right">${jumlah}</td>
                     <td class="px-2 py-2 sm:px-4 sm:py-3 text-xs" title="${keterangan}">${keterangan.substring(0, 20)}${keterangan.length > 20 ? '...' : ''}</td>
+                    ${!isHistoryTable ? selisihHtml : ''}
                     ${statusHtml}
                     ${isAdmin ? `<td class="px-2 py-2 sm:px-4 sm:py-3 text-center no-print flex items-center justify-center space-x-2">
                         <button data-row-index="${row.rowIndex}" data-type="${type}" class="mark-btn text-yellow-400 hover:text-yellow-300 transition-colors p-1" title="Tandai Data">
@@ -963,13 +977,13 @@
                 tr.innerHTML = rowHtml;
                 tableBody.appendChild(tr);
             });
-            if (data.length > 0 && !tableBodyId.includes('riwayat')) { // Hanya tampilkan total untuk tabel terkini
+            if (data.length > 0 && !isHistoryTable) { // Hanya tampilkan total untuk tabel terkini
                 const totalRow = document.createElement('tr');
                 totalRow.className = 'bg-gray-700 font-bold text-white border-t-2 border-gray-600';
                  if (isAdmin) {
-                     totalRow.innerHTML = `<td class="px-2 py-2 sm:px-4 sm:py-3 no-print"></td><td colspan="5" class="px-2 py-2 sm:px-4 sm:py-3 text-right">Total:</td><td class="px-2 py-2 sm:px-4 sm:py-3 text-right">${totalJumlah}</td><td colspan="3" class="px-2 py-2 sm:px-4 sm:py-3"></td>`;
+                     totalRow.innerHTML = `<td class="px-2 py-2 sm:px-4 sm:py-3 no-print"></td><td colspan="5" class="px-2 py-2 sm:px-4 sm:py-3 text-right">Total:</td><td class="px-2 py-2 sm:px-4 sm:py-3 text-right">${totalJumlah}</td><td colspan="4" class="px-2 py-2 sm:px-4 sm:py-3"></td>`;
                  } else {
-                     totalRow.innerHTML = `<td colspan="5" class="px-2 py-2 sm:px-4 sm:py-3 text-right">Total:</td><td class="px-2 py-2 sm:px-4 sm:py-3 text-right">${totalJumlah}</td><td colspan="2" class="px-2 py-2 sm:px-4 sm:py-3"></td>`;
+                     totalRow.innerHTML = `<td colspan="5" class="px-2 py-2 sm:px-4 sm:py-3 text-right">Total:</td><td class="px-2 py-2 sm:px-4 sm:py-3 text-right">${totalJumlah}</td><td colspan="3" class="px-2 py-2 sm:px-4 sm:py-3"></td>`;
                  }
                 tableBody.appendChild(totalRow);
             }
@@ -997,7 +1011,7 @@
             if (!tableBody) return;
             tableBody.innerHTML = ''; // Hapus konten lama
             const isAdmin = currentUserRole === 'admin';
-            const columns = isAdmin ? 10 : 8;
+            const columns = isAdmin ? 11 : 9; // Ditambah 1 untuk kolom selisih
             const skeletonRowHtml = `
                 <tr class="bg-gray-800 border-b border-gray-700">
                     ${Array(columns).fill(0).map(() => `
