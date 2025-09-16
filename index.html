@@ -826,13 +826,15 @@
             const allDataKirim = [...todayDataKirim, ...historyDataKirim];
             const allDataTerima = [...todayDataTerima, ...historyDataTerima];
             
-            // Hanya hitung agregat jika kita merender tabel terkini
+            // --- START: REVISED AGGREGATION & DUPLICATE LOGIC ---
             let aggregatedTotals;
+            const counts = new Map();
             if (!isHistoryTable) {
                 aggregatedTotals = new Map();
+
+                // Hitung total selisih
                 [...todayDataKirim, ...todayDataTerima].forEach(r => {
-                    // Kunci agregasi HANYA berdasarkan No. BPB
-                    const key = `${String(r['No BPB'] || '').trim().toUpperCase()}`;
+                    const key = `${String(r['No BPB'] || '').trim().toUpperCase()}-${advancedNormalizeItemCode(r['Kode Barang'])}`;
                     if (!aggregatedTotals.has(key)) {
                         aggregatedTotals.set(key, { jmlKirim: 0, jmlTerima: 0 });
                     }
@@ -843,7 +845,20 @@
                         entry.jmlTerima += parseInt(r.Jumlah || 0);
                     }
                 });
+
+                // Hitung duplikasi
+                data.forEach(row => {
+                    const key = `${String(row['No BPB'] || '').trim().toUpperCase()}-${advancedNormalizeItemCode(row['Kode Barang'])}`;
+                    counts.set(key, (counts.get(key) || 0) + 1);
+                });
             }
+            const duplicates = new Set();
+            for (const [key, count] of counts.entries()) {
+                if (count > 1) {
+                    duplicates.add(key);
+                }
+            }
+            // --- END: REVISED LOGIC ---
 
             if (data.length === 0) {
                 tableBody.innerHTML = `<tr><td colspan="${isHistoryTable ? colspan : colspan + 1}" class="text-center p-4">Tidak ada data.</td></tr>`;
@@ -856,6 +871,13 @@
                 let rowClasses = ['bg-gray-800', 'border-b', 'border-gray-700', 'hover:bg-gray-600'];
                 if (row.Tanda === 'MARKED') {
                     rowClasses.push('marked-row');
+                }
+                
+                // Tambahkan kelas duplikat jika terdeteksi
+                const currentKey = `${String(row['No BPB'] || '').trim().toUpperCase()}-${advancedNormalizeItemCode(row['Kode Barang'])}`;
+                if (duplicates.has(currentKey)) {
+                    rowClasses.push('duplicate-row');
+                    tr.title = 'Data duplikat terdeteksi untuk No. BPB dan Kode Barang ini.';
                 }
 
                 tr.className = rowClasses.join(' ');
@@ -935,16 +957,16 @@
                     }
                 }
 
-                // --- SELISIH LOGIC FOR TERKINI TABLES (UPDATED) ---
+                // --- SELISIH LOGIC FOR TERKINI TABLES (REVISED) ---
                 let selisihHtml = '';
                 if (!isHistoryTable) {
-                    const aggregateKey = noBpb; // Kunci berdasarkan No BPB saja
+                    const aggregateKey = `${noBpb}-${advancedNormalizeItemCode(kodeBarang)}`;
                     const totals = aggregatedTotals.get(aggregateKey) || { jmlKirim: 0, jmlTerima: 0 };
                     const selisih = totals.jmlTerima - totals.jmlKirim;
                     
                     const selisihClass = selisih < 0 ? 'text-red-400' : (selisih > 0 ? 'text-amber-400' : 'text-green-400');
                     const selisihText = selisih > 0 ? `+${selisih}` : selisih;
-                    selisihHtml = `<td class="px-2 py-2 sm:px-4 sm:py-3 text-center font-bold ${selisihClass}" title="Total Selisih untuk BPB ${noBpb}">${selisihText}</td>`;
+                    selisihHtml = `<td class="px-2 py-2 sm:px-4 sm:py-3 text-center font-bold ${selisihClass}" title="Total Selisih untuk ${noBpb} - ${kodeBarang}">${selisihText}</td>`;
                 }
 
 
